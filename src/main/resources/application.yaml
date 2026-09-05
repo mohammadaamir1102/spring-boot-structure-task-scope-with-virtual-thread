@@ -1,0 +1,6 @@
+spring:
+  application:
+    name: spring-boot-structure-task-scope-with-virtual-thread
+  threads:
+    virtual:
+      enabled: true
