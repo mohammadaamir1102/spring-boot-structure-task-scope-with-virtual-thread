@@ -27,8 +27,7 @@ public class StructuredTaskScopeController {
     }
 
     @GetMapping("/sequential")
-    public Map<String, Object> sequential(@RequestParam(defaultValue = "U001") String userId)
-            throws InterruptedException {
+    public Map<String, Object> sequential(@RequestParam(defaultValue = "U001") String userId) {
 
         var start = System.currentTimeMillis();
 
