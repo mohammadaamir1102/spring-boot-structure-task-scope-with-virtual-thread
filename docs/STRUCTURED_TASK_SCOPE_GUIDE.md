@@ -70,8 +70,12 @@ src/main/java/com/aamir/
 ├── SpringBootStructureTaskScopeWithVirtualThreadApplication.java
 ├── controller/
 │   └── StructuredTaskScopeController.java    # All REST endpoints
-└── service/
-    └── DummyService.java                     # Simulated I/O-bound services
+├── service/
+│   └── DummyService.java                     # Simulated I/O-bound services
+└── exception/
+    ├── ServiceCustomException.java           # Custom business exception
+    ├── ErrorResponse.java                    # Structured error response record
+    └── GlobalExceptionHandler.java           # @RestControllerAdvice handler
 
 src/test/java/com/aamir/
 └── StructuredTaskScopeControllerTest.java    # Integration tests
@@ -86,7 +90,81 @@ src/test/java/com/aamir/
 | `getPaymentData(userId)` | 2s | Always succeeds |
 | `getPrimaryPrice(symbol)` | 2s | Always succeeds |
 | `getBackupPrice(symbol)` | 3s | Always succeeds (slower) |
-| `alwaysFail(userId)` | 1s | Always throws `RuntimeException` |
+| `alwaysFail(userId)` | 1s | Always throws `ServiceCustomException` (503) |
+
+### Exception Handling
+
+#### ServiceCustomException
+
+Custom runtime exception with structured fields:
+
+```java
+public class ServiceCustomException extends RuntimeException {
+    private final int statusCode;
+    private final String timestamp;
+    // ...
+}
+```
+
+**Usage:**
+
+```java
+throw new ServiceCustomException("Service unavailable for user: U001", 503);
+throw new ServiceCustomException("Thread interrupted", 500, cause);
+```
+
+#### ErrorResponse (Record)
+
+Structured error response returned to the client:
+
+```java
+public record ErrorResponse(
+    int statusCode,
+    String error,
+    String message,
+    String timestamp,
+    Map<String, Object> details
+) {}
+```
+
+**Example JSON response:**
+
+```json
+{
+  "statusCode": 503,
+  "error": "Service Unavailable",
+  "message": "Service unavailable for user: U001",
+  "timestamp": "2026-09-05T11:50:50.370",
+  "details": {
+    "source": "service-layer"
+  }
+}
+```
+
+#### GlobalExceptionHandler
+
+Handles all exceptions with proper HTTP status codes and structured responses:
+
+| Exception | HTTP Status | Handler |
+|---|---|---|
+| `ServiceCustomException` | Custom (503, 500, etc.) | `handleServiceCustomException` |
+| `StructuredTaskScope.FailedException` | 500 | `handleFailedException` |
+| `Exception` (fallback) | 500 | `handleGenericException` |
+
+**Example error response for StructuredTaskScope failure:**
+
+```json
+{
+  "statusCode": 500,
+  "error": "StructuredTaskScope Failure",
+  "message": "Service unavailable for user: U001",
+  "timestamp": "2026-09-05T11:51:00.370",
+  "details": {
+    "source": "structured-task-scope",
+    "causeType": "ServiceCustomException"
+  }
+}
+```
 
 ---
 
@@ -720,7 +798,7 @@ spring:
 |---|---|
 | `sequential_shouldReturnDataWithTiming` | Sequential API returns correct data with ~6s timing |
 | `completableFuture_shouldReturnDataWithTiming` | CompletableFuture API returns data with ~2s timing |
-| `completableFutureFailFast_shouldReturn500` | CompletableFuture fail-fast returns 500 on subtask failure |
+| `completableFutureFailFast_shouldReturnStructuredErrorResponse` | Fail-fast returns structured error with statusCode, error, message |
 | `completableFutureRace_shouldReturnFastestResult` | CompletableFuture `anyOf()` races and returns first result |
 | `structuredAwaitAll_shouldReturnDataWithTiming` | `Joiner.awaitAll()` returns all results, never throws |
 | `structuredAwaitAllSuccessfulOrThrow_shouldReturnDataWithTiming` | `Joiner.awaitAllSuccessfulOrThrow()` succeeds when all OK |
@@ -729,8 +807,8 @@ spring:
 | `structuredAllUntil_shouldReturnDataWithTiming` | `Joiner.allUntil(predicate)` completes with custom logic |
 | `sequential_shouldTakeMoreTimeThanStructured` | Sequential > Structured in timing |
 | `failureAwaitAll_shouldShowFailedSubtaskState` | Failed subtask shows `FAILED` state |
-| `failureAwaitAllSuccessfulOrThrow_shouldReturn500` | Failure causes HTTP 500 |
-| `failureAllSuccessfulOrThrow_shouldReturn500` | Failure causes HTTP 500 |
-| `failureAnySuccessfulResultOrThrow_shouldReturn500` | All-fail causes HTTP 500 |
+| `failureAwaitAllSuccessfulOrThrow_shouldReturnStructuredErrorResponse` | Returns structured error with 500 status |
+| `failureAllSuccessfulOrThrow_shouldReturnStructuredErrorResponse` | Returns structured error with 500 status |
+| `failureAnySuccessfulResultOrThrow_shouldReturnStructuredErrorResponse` | Returns structured error with 500 status |
 | `failureAllUntil_shouldTriggerCancelAfterTwoFailures` | Predicate triggers on 2 failures |
 | `failureAnyWithFallback_shouldReturnSuccessFromWorkingTask` | One fails, one succeeds — fallback works |

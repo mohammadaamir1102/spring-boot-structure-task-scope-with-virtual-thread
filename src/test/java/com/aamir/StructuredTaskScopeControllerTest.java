@@ -75,9 +75,13 @@ class StructuredTaskScopeControllerTest {
     }
 
     @Test
-    void completableFutureFailFast_shouldReturn500() throws Exception {
-        var statusCode = getStatusCode("/api/completable-future/fail-fast?userId=U001");
-        assertThat(statusCode).isEqualTo(500);
+    void completableFutureFailFast_shouldReturnStructuredErrorResponse() throws Exception {
+        var body = get("/api/completable-future/fail-fast?userId=U001");
+
+        assertThat(body.get("statusCode")).isEqualTo(500);
+        assertThat(body.get("error")).isNotNull();
+        assertThat(body.get("message")).isNotNull();
+        assertThat(body.get("timestamp")).isNotNull();
     }
 
     @Test
@@ -170,21 +174,33 @@ class StructuredTaskScopeControllerTest {
     }
 
     @Test
-    void failureAwaitAllSuccessfulOrThrow_shouldReturn500() throws Exception {
-        var statusCode = getStatusCode("/api/failure/await-all-successful-or-throw?userId=U001");
-        assertThat(statusCode).isEqualTo(500);
+    void failureAwaitAllSuccessfulOrThrow_shouldReturnStructuredErrorResponse() throws Exception {
+        var body = get("/api/failure/await-all-successful-or-throw?userId=U001");
+
+        assertThat(body.get("statusCode")).isEqualTo(500);
+        assertThat(body.get("error")).isNotNull();
+        assertThat(body.get("message")).isNotNull();
+        assertThat(body.get("timestamp")).isNotNull();
     }
 
     @Test
-    void failureAllSuccessfulOrThrow_shouldReturn500() throws Exception {
-        var statusCode = getStatusCode("/api/failure/all-successful-or-throw?userId=U001");
-        assertThat(statusCode).isEqualTo(500);
+    void failureAllSuccessfulOrThrow_shouldReturnStructuredErrorResponse() throws Exception {
+        var body = get("/api/failure/all-successful-or-throw?userId=U001");
+
+        assertThat(body.get("statusCode")).isEqualTo(500);
+        assertThat(body.get("error")).isNotNull();
+        assertThat(body.get("message")).isNotNull();
+        assertThat(body.get("timestamp")).isNotNull();
     }
 
     @Test
-    void failureAnySuccessfulResultOrThrow_shouldReturn500() throws Exception {
-        var statusCode = getStatusCode("/api/failure/any-successful-result-or-throw?userId=U001");
-        assertThat(statusCode).isEqualTo(500);
+    void failureAnySuccessfulResultOrThrow_shouldReturnStructuredErrorResponse() throws Exception {
+        var body = get("/api/failure/any-successful-result-or-throw?userId=U001");
+
+        assertThat(body.get("statusCode")).isEqualTo(500);
+        assertThat(body.get("error")).isNotNull();
+        assertThat(body.get("message")).isNotNull();
+        assertThat(body.get("timestamp")).isNotNull();
     }
 
     @Test

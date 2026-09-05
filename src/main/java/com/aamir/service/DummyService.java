@@ -1,5 +1,6 @@
 package com.aamir.service;
 
+import com.aamir.exception.ServiceCustomException;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -47,7 +48,10 @@ public class DummyService {
 
     public Map<String, Object> alwaysFail(String userId) {
         sleep(1000);
-        throw new RuntimeException("Service unavailable for user: %s".formatted(userId));
+        throw new ServiceCustomException(
+                "Service unavailable for user: %s".formatted(userId),
+                503
+        );
     }
 
     private void sleep(long millis) {
@@ -55,7 +59,7 @@ public class DummyService {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException(e);
+            throw new ServiceCustomException("Thread interrupted", 500, e);
         }
     }
 }
