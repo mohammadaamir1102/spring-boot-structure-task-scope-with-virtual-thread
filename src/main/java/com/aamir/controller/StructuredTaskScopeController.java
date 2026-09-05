@@ -79,6 +79,69 @@ public class StructuredTaskScopeController {
         return result;
     }
 
+    @GetMapping("/completable-future/fail-fast")
+    public Map<String, Object> completableFutureFailFast(
+            @RequestParam(defaultValue = "U001") String userId) throws Exception {
+
+        var start = System.currentTimeMillis();
+
+        var profileFuture = CompletableFuture.supplyAsync(() -> dummyService.getProfileData(userId));
+        var ordersFuture = CompletableFuture.supplyAsync(() -> dummyService.getOrderData(userId));
+        var paymentsFuture = CompletableFuture.supplyAsync(() -> dummyService.alwaysFail(userId));
+
+        var allFutures = List.of(profileFuture, ordersFuture, paymentsFuture);
+
+        try {
+            CompletableFuture.allOf(profileFuture, ordersFuture, paymentsFuture).join();
+        } catch (Exception e) {
+            allFutures.forEach(f -> f.cancel(true));
+            throw e;
+        }
+
+        var profile = profileFuture.get();
+        var orders = ordersFuture.get();
+        var payments = paymentsFuture.get();
+
+        var end = System.currentTimeMillis();
+        var timeTakenMs = end - start;
+
+        var result = new LinkedHashMap<String, Object>();
+        result.put("api", "CompletableFuture Fail-Fast (Manual Cancellation)");
+        result.put("profile", profile);
+        result.put("orders", orders);
+        result.put("payments", payments);
+        result.put("timeTakenMs", timeTakenMs);
+        result.put("timeTakenSeconds", "%.2f".formatted(timeTakenMs / 1000.0));
+        result.put("note", "Manual cancellation required - CompletableFuture doesn't auto-cancel siblings");
+        return result;
+    }
+
+    @GetMapping("/completable-future/race")
+    public Map<String, Object> completableFutureRace(
+            @RequestParam(defaultValue = "AAPL") String symbol) throws Exception {
+
+        var start = System.currentTimeMillis();
+
+        var primaryFuture = CompletableFuture.supplyAsync(() -> dummyService.getPrimaryPrice(symbol));
+        var backupFuture = CompletableFuture.supplyAsync(() -> dummyService.getBackupPrice(symbol));
+
+        var winner = CompletableFuture.anyOf(primaryFuture, backupFuture).get();
+
+        primaryFuture.cancel(true);
+        backupFuture.cancel(true);
+
+        var end = System.currentTimeMillis();
+        var timeTakenMs = end - start;
+
+        var result = new LinkedHashMap<String, Object>();
+        result.put("api", "CompletableFuture Race (anyOf)");
+        result.put("price", winner);
+        result.put("timeTakenMs", timeTakenMs);
+        result.put("timeTakenSeconds", "%.2f".formatted(timeTakenMs / 1000.0));
+        result.put("note", "Manual cancellation of loser required - no built-in cancellation policy");
+        return result;
+    }
+
     @GetMapping("/structured/await-all")
     public Map<String, Object> structuredAwaitAll(@RequestParam(defaultValue = "U001") String userId)
             throws InterruptedException {

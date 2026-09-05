@@ -75,6 +75,23 @@ class StructuredTaskScopeControllerTest {
     }
 
     @Test
+    void completableFutureFailFast_shouldReturn500() throws Exception {
+        var statusCode = getStatusCode("/api/completable-future/fail-fast?userId=U001");
+        assertThat(statusCode).isEqualTo(500);
+    }
+
+    @Test
+    void completableFutureRace_shouldReturnFastestResult() throws Exception {
+        var body = get("/api/completable-future/race?symbol=AAPL");
+
+        assertThat(body.get("api")).isEqualTo("CompletableFuture Race (anyOf)");
+        assertThat(body.get("price")).isNotNull();
+        assertThat(body.get("timeTakenMs")).isNotNull();
+        assertThat(body.get("timeTakenSeconds")).isNotNull();
+        assertThat(body.get("note")).isEqualTo("Manual cancellation of loser required - no built-in cancellation policy");
+    }
+
+    @Test
     void structuredAwaitAll_shouldReturnDataWithTiming() throws Exception {
         var body = get("/api/structured/await-all?userId=U001");
 

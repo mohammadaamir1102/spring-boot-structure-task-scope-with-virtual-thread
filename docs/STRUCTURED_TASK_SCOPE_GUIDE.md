@@ -145,10 +145,91 @@ curl "http://localhost:8080/api/completable-future?userId=U001"
 - Manual exception aggregation
 - Easy to leak orphaned tasks
 - Stack traces are hard to follow
+- **No automatic cancellation** — you must cancel siblings manually
 
 ---
 
-#### 3. StructuredTaskScope + Joiner.awaitAll()
+#### 3. CompletableFuture Fail-Fast (Manual Cancellation)
+
+> Demonstrates how to implement fail-fast with `CompletableFuture` — requires **manual cancellation** of sibling futures.
+
+```bash
+curl "http://localhost:8080/api/completable-future/fail-fast?userId=U001"
+```
+
+```json
+{
+  "api": "CompletableFuture Fail-Fast (Manual Cancellation)",
+  "error": "Service unavailable for user: U001",
+  "status": 500
+}
+```
+
+**Code pattern:**
+
+```java
+var profileFuture = CompletableFuture.supplyAsync(() -> getProfileData(userId));
+var ordersFuture = CompletableFuture.supplyAsync(() -> getOrderData(userId));
+var paymentsFuture = CompletableFuture.supplyAsync(() -> alwaysFail(userId)); // fails!
+
+var allFutures = List.of(profileFuture, ordersFuture, paymentsFuture);
+
+try {
+    CompletableFuture.allOf(profileFuture, ordersFuture, paymentsFuture).join();
+} catch (Exception e) {
+    allFutures.forEach(f -> f.cancel(true));  // Manual cancellation!
+    throw e;
+}
+```
+
+**Drawbacks vs StructuredTaskScope:**
+- Must collect all futures in a list manually
+- Must catch exceptions and cancel each future individually
+- `cancel(true)` only sends an interrupt — no guarantee the task stops
+- Easy to forget to cancel a future → orphaned task leak
+- No built-in Joiner policy — you write cancellation logic every time
+
+---
+
+#### 4. CompletableFuture Race (anyOf)
+
+> Race two providers — first wins, but you must **manually cancel** the loser.
+
+```bash
+curl "http://localhost:8080/api/completable-future/race?symbol=AAPL"
+```
+
+```json
+{
+  "api": "CompletableFuture Race (anyOf)",
+  "price": "Price{symbol=AAPL, value=150.25, source=primary}",
+  "timeTakenMs": 2032,
+  "timeTakenSeconds": "2.03",
+  "note": "Manual cancellation of loser required - no built-in cancellation policy"
+}
+```
+
+**Code pattern:**
+
+```java
+var primaryFuture = CompletableFuture.supplyAsync(() -> getPrimaryPrice(symbol));
+var backupFuture = CompletableFuture.supplyAsync(() -> getBackupPrice(symbol));
+
+var winner = CompletableFuture.anyOf(primaryFuture, backupFuture).get();
+
+primaryFuture.cancel(true);   // Manual!
+backupFuture.cancel(true);    // Manual!
+```
+
+**vs StructuredTaskScope `anySuccessfulResultOrThrow()`:**
+- `anyOf()` returns `Object` — you must cast
+- No built-in cancellation policy — you cancel manually
+- If the winner throws, `anyOf()` wraps it in `CompletionException`
+- StructuredTaskScope: first success wins, losers auto-cancelled, clean exception propagation
+
+---
+
+#### 5. StructuredTaskScope + Joiner.awaitAll()
 
 > **Joiner 1/5** — Waits for every subtask. Never throws. Inspect each `Subtask.state()` manually.
 
@@ -178,7 +259,7 @@ curl "http://localhost:8080/api/structured/await-all?userId=U001"
 
 ---
 
-#### 4. StructuredTaskScope + Joiner.awaitAllSuccessfulOrThrow()
+#### 6. StructuredTaskScope + Joiner.awaitAllSuccessfulOrThrow()
 
 > **Joiner 2/5** — Waits for all to succeed; throws `FailedException` on the first failure.
 
@@ -208,7 +289,7 @@ curl "http://localhost:8080/api/structured/await-all-successful-or-throw?userId=
 
 ---
 
-#### 5. StructuredTaskScope + Joiner.allSuccessfulOrThrow()
+#### 7. StructuredTaskScope + Joiner.allSuccessfulOrThrow()
 
 > **Joiner 3/5** — Same fail-fast policy, but `join()` returns `Stream<Subtask<T>>`.
 
@@ -240,7 +321,7 @@ curl "http://localhost:8080/api/structured/all-successful-or-throw?userId=U001"
 
 ---
 
-#### 6. StructuredTaskScope + Joiner.anySuccessfulResultOrThrow()
+#### 8. StructuredTaskScope + Joiner.anySuccessfulResultOrThrow()
 
 > **Joiner 4/5** — Races subtasks, returns the first success. Throws only if every subtask fails.
 
@@ -269,7 +350,7 @@ curl "http://localhost:8080/api/structured/any-successful-result-or-throw?symbol
 
 ---
 
-#### 7. StructuredTaskScope + Joiner.allUntil(predicate)
+#### 9. StructuredTaskScope + Joiner.allUntil(predicate)
 
 > **Joiner 5/5** — Fully custom: keep collecting subtasks until your `Predicate` says "cancel now".
 
@@ -300,7 +381,7 @@ curl "http://localhost:8080/api/structured/all-until?userId=U001"
 
 ### Failure Scenarios
 
-#### 8. Failure + Joiner.awaitAll()
+#### 10. Failure + Joiner.awaitAll()
 
 > Shows how `awaitAll()` handles failures — `join()` never throws, you must inspect each subtask.
 
@@ -324,7 +405,7 @@ curl "http://localhost:8080/api/failure/await-all?userId=U001"
 
 ---
 
-#### 9-11. Failure + Throws Joiners (return 500)
+#### 11. Failure + Throws Joiners (return 500)
 
 These endpoints demonstrate that **throwing Joiners cause the scope to throw `FailedException`** when any subtask fails:
 
@@ -484,41 +565,47 @@ curl -s "http://localhost:8080/api/sequential?userId=U001" | python3 -m json.too
 # 2. CompletableFuture (~2s)
 curl -s "http://localhost:8080/api/completable-future?userId=U001" | python3 -m json.tool
 
-# 3. StructuredTaskScope + Joiner.awaitAll() (~2s)
+# 3. CompletableFuture Fail-Fast (returns 500 — manual cancellation)
+curl -s -w "\nHTTP Status: %{http_code}\n" "http://localhost:8080/api/completable-future/fail-fast?userId=U001"
+
+# 4. CompletableFuture Race (~2s — first wins)
+curl -s "http://localhost:8080/api/completable-future/race?symbol=AAPL" | python3 -m json.tool
+
+# 5. StructuredTaskScope + Joiner.awaitAll() (~2s)
 curl -s "http://localhost:8080/api/structured/await-all?userId=U001" | python3 -m json.tool
 
-# 4. StructuredTaskScope + Joiner.awaitAllSuccessfulOrThrow() (~2s)
+# 6. StructuredTaskScope + Joiner.awaitAllSuccessfulOrThrow() (~2s)
 curl -s "http://localhost:8080/api/structured/await-all-successful-or-throw?userId=U001" | python3 -m json.tool
 
-# 5. StructuredTaskScope + Joiner.allSuccessfulOrThrow() (~2s)
+# 7. StructuredTaskScope + Joiner.allSuccessfulOrThrow() (~2s)
 curl -s "http://localhost:8080/api/structured/all-successful-or-throw?userId=U001" | python3 -m json.tool
 
-# 6. StructuredTaskScope + Joiner.anySuccessfulResultOrThrow() (~2s)
+# 8. StructuredTaskScope + Joiner.anySuccessfulResultOrThrow() (~2s)
 curl -s "http://localhost:8080/api/structured/any-successful-result-or-throw?symbol=AAPL" | python3 -m json.tool
 
-# 7. StructuredTaskScope + Joiner.allUntil(predicate) (~2s)
+# 9. StructuredTaskScope + Joiner.allUntil(predicate) (~2s)
 curl -s "http://localhost:8080/api/structured/all-until?userId=U001" | python3 -m json.tool
 ```
 
 ### Failure Scenarios
 
 ```bash
-# 8. Failure + awaitAll() — shows FAILED subtask state (200 OK)
+# 10. Failure + awaitAll() — shows FAILED subtask state (200 OK)
 curl -s "http://localhost:8080/api/failure/await-all?userId=U001" | python3 -m json.tool
 
-# 9. Failure + awaitAllSuccessfulOrThrow() — returns 500
+# 11. Failure + awaitAllSuccessfulOrThrow() — returns 500
 curl -s -w "\nHTTP Status: %{http_code}\n" "http://localhost:8080/api/failure/await-all-successful-or-throw?userId=U001"
 
-# 10. Failure + allSuccessfulOrThrow() — returns 500
+# 12. Failure + allSuccessfulOrThrow() — returns 500
 curl -s -w "\nHTTP Status: %{http_code}\n" "http://localhost:8080/api/failure/all-successful-or-throw?userId=U001"
 
-# 11. Failure + anySuccessfulResultOrThrow() — returns 500 (all fail)
+# 13. Failure + anySuccessfulResultOrThrow() — returns 500 (all fail)
 curl -s -w "\nHTTP Status: %{http_code}\n" "http://localhost:8080/api/failure/any-successful-result-or-throw?userId=U001"
 
-# 12. Failure + allUntil(predicate) — 2 failures trigger cancel
+# 14. Failure + allUntil(predicate) — 2 failures trigger cancel
 curl -s "http://localhost:8080/api/failure/all-until?userId=U001" | python3 -m json.tool
 
-# 13. Failure + anySuccessfulResultOrThrow() with fallback — one fails, one succeeds
+# 15. Failure + anySuccessfulResultOrThrow() with fallback — one fails, one succeeds
 curl -s "http://localhost:8080/api/failure/any-with-fallback?userId=U001" | python3 -m json.tool
 ```
 
@@ -633,6 +720,8 @@ spring:
 |---|---|
 | `sequential_shouldReturnDataWithTiming` | Sequential API returns correct data with ~6s timing |
 | `completableFuture_shouldReturnDataWithTiming` | CompletableFuture API returns data with ~2s timing |
+| `completableFutureFailFast_shouldReturn500` | CompletableFuture fail-fast returns 500 on subtask failure |
+| `completableFutureRace_shouldReturnFastestResult` | CompletableFuture `anyOf()` races and returns first result |
 | `structuredAwaitAll_shouldReturnDataWithTiming` | `Joiner.awaitAll()` returns all results, never throws |
 | `structuredAwaitAllSuccessfulOrThrow_shouldReturnDataWithTiming` | `Joiner.awaitAllSuccessfulOrThrow()` succeeds when all OK |
 | `structuredAllSuccessfulOrThrow_shouldReturnDataWithTiming` | `Joiner.allSuccessfulOrThrow()` returns stream of results |
